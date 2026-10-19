@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "recsys"
+version = "0.1.0"
+description = "Recommender-system experiments on the Yambda music dataset"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "numpy>=1.24,<2",
+    "polars>=1.0",
+    "scipy>=1.10",
+    "torch>=2.1",
+    "implicit>=0.7",
+    "gensim>=4.3",
+    "tqdm",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "gdown"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
