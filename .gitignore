@@ -10,3 +10,4 @@ data/*
 checkpoints/
 
 .vscode/
+catboost_info/

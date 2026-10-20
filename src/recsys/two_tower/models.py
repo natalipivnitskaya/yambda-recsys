@@ -13,14 +13,13 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from recsys.ops import pad_to_bucket, segment_sum
+
 
 class UserEncoder(nn.Module):
     """``P_u = sum_k E[i_k]`` over a flattened batch of histories.
 
-    The flattened history is padded up to a multiple of ``bucket`` so that only a
-    few distinct tensor shapes occur: the MPS backend compiles and caches a graph
-    per shape, and per-batch lengths would otherwise grow memory without bound.
-    Padding positions are summed into an extra row that is dropped.
+    Histories are padded to a multiple of ``bucket`` (see :func:`recsys.ops.pad_to_bucket`).
     """
 
     def __init__(self, num_items: int, embedding_dim: int, bucket: int = 4096) -> None:
@@ -29,19 +28,8 @@ class UserEncoder(nn.Module):
         self.bucket = bucket
 
     def forward(self, history: Dict[str, torch.Tensor]) -> torch.Tensor:
-        item_ids, lengths = history["item_id"], history["length"]
-        batch_size, total = len(lengths), len(item_ids)
-        padded_total = -(-total // self.bucket) * self.bucket
-        item_ids = F.pad(item_ids, (0, padded_total - total))
-
-        # segment[k] = user that flattened position k belongs to; padding maps to row `batch_size`
-        # (searchsorted instead of repeat_interleave, which is broken on MPS)
-        positions = torch.arange(padded_total, device=lengths.device)
-        segment = torch.searchsorted(torch.cumsum(lengths, 0), positions, right=True)
-
-        embeddings = self.item_embeddings(item_ids)
-        out = embeddings.new_zeros((batch_size + 1, embeddings.shape[1]))
-        return out.index_add_(0, segment, embeddings)[:batch_size]
+        embeddings = self.item_embeddings(pad_to_bucket(history["item_id"], self.bucket))
+        return segment_sum(embeddings, history["length"])
 
 
 class TwoTower(nn.Module):
