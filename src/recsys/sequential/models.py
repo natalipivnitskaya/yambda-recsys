@@ -16,6 +16,16 @@ import torch.nn.functional as F
 from recsys.two_tower.data import pad_sequences
 
 
+@torch.no_grad()
+def init_weights(model: nn.Module, std: float = 0.02) -> None:
+    """Truncated-normal weights for every ``Linear``/``Embedding``, zero ``Linear`` biases."""
+    for module in model.modules():
+        if isinstance(module, (nn.Linear, nn.Embedding)):
+            nn.init.trunc_normal_(module.weight, std=std, a=-2 * std, b=2 * std)
+        if isinstance(module, nn.Linear) and module.bias is not None:
+            nn.init.zeros_(module.bias)
+
+
 class CausalSelfAttention(nn.Module):
     """Multi-head self-attention where position ``t`` sees only valid positions ``<= t``."""
 
@@ -91,6 +101,9 @@ class TransformerUserEncoder(nn.Module):
     Returns padded hidden states ``(B, max_seq_len, D)`` and the validity mask.
     Batches are always padded to ``max_seq_len`` so that every batch has the same
     shape (see :func:`recsys.ops.pad_to_bucket` for why this matters on MPS).
+
+    ``item_embeddings`` replaces the default ``nn.Embedding(num_items, D)``; any
+    module that maps ids to vectors and exposes the full table as ``.weight`` works.
     """
 
     def __init__(
@@ -101,10 +114,11 @@ class TransformerUserEncoder(nn.Module):
         n_layers: int = 2,
         n_heads: int = 2,
         dropout: float = 0.1,
+        item_embeddings: Optional[nn.Module] = None,
     ) -> None:
         super().__init__()
         self.max_seq_len = max_seq_len
-        self.item_embeddings = nn.Embedding(num_items, embedding_dim)
+        self.item_embeddings = item_embeddings or nn.Embedding(num_items, embedding_dim)
         self.position_embeddings = nn.Embedding(max_seq_len, embedding_dim)
         self.gpt = GPT(n_layers, embedding_dim, n_heads, dropout)
 
@@ -142,16 +156,15 @@ class NextItemTransformer(nn.Module):
         n_heads: int = 2,
         dropout: float = 0.1,
         init_std: float = 0.02,
+        item_embeddings: Optional[nn.Module] = None,
     ) -> None:
         super().__init__()
-        self.encoder = TransformerUserEncoder(num_items, embedding_dim, max_seq_len, n_layers, n_heads, dropout)
+        self.encoder = TransformerUserEncoder(
+            num_items, embedding_dim, max_seq_len, n_layers, n_heads, dropout, item_embeddings
+        )
         self.num_negatives = num_negatives
         self.register_buffer("log_q", None if log_q is None else log_q.float())
-        for module in self.modules():
-            if isinstance(module, (nn.Linear, nn.Embedding)):
-                nn.init.trunc_normal_(module.weight, std=init_std, a=-2 * init_std, b=2 * init_std)
-            if isinstance(module, nn.Linear):
-                nn.init.zeros_(module.bias)
+        init_weights(self, init_std)
 
     @property
     def item_matrix(self) -> torch.Tensor:
