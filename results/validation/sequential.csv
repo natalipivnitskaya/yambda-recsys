@@ -1,0 +1,7 @@
+method,best_epoch,hitrate,recall,ndcg,coverage
+"Transformer, semantic ID embeddings (codes + item ids, 3x256 behaviour codes, 30 ep), in-batch negatives + logQ",23,0.37735552763819097,0.1337810325194957,0.05124041355961972,0.4413912314037507
+"Transformer, semantic ID embeddings (codes + item ids, 3x256 content codes, 30 ep), in-batch negatives + logQ",30,0.3717546063651591,0.13113814094782927,0.049395201212212296,0.44855328965346314
+"Transformer (2 layers, d=64, len 100, 30 ep), in-batch negatives + logQ",26,0.3546115996649916,0.12419973105516528,0.04596062234513889,0.4069154851706629
+"Generative retrieval over semantic IDs (codes only, 3x256 behaviour codes, beam 100, 20 ep)",20,0.28030778894472363,0.08708096792760706,0.033388071554119284,0.17870193254828193
+"Transformer, semantic ID embeddings (codes only, 3x256 behaviour codes, 20 ep), in-batch negatives + logQ",19,0.25944828308207707,0.07480224595146708,0.028787961707058714,0.4081547055421748
+"Generative retrieval over semantic IDs (codes only, 3x256 content codes, beam 100, 20 ep)",20,0.2159495393634841,0.06253772240725032,0.022996571329416005,0.1602280165483582

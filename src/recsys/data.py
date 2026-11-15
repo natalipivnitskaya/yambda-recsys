@@ -38,6 +38,7 @@ def load_dataset(
     min_item_interactions: int = 5,
     test_seconds: int = WEEK_SECONDS,
     reindex_items: bool = False,
+    validation: bool = False,
 ) -> Dataset:
     """Read the parquet files and build a leave-last-week-out split.
 
@@ -49,6 +50,10 @@ def load_dataset(
 
     With ``reindex_items=True`` item ids are remapped to ``[0, n_items)`` so they
     can index an ``nn.Embedding`` directly.
+
+    With ``validation=True`` the last ``test_seconds`` are dropped and the window
+    before them becomes the held-out set, for tuning without touching the test
+    week. Item filtering and ids stay the same as in the test split.
     """
     data_dir = Path(data_dir)
     interactions = pl.read_parquet(data_dir / "interactions.parquet")
@@ -76,6 +81,9 @@ def load_dataset(
         artists = _apply_mapping(artists, mapping)
 
     split_point = interactions["timestamp"].max() - test_seconds
+    if validation:
+        interactions = interactions.filter(pl.col("timestamp") < split_point)
+        split_point -= test_seconds
     train = interactions.filter(pl.col("timestamp") < split_point)
     test = (
         interactions.filter(pl.col("timestamp") >= split_point)

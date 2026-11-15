@@ -4,6 +4,10 @@
     python scripts/run_semantic_ids.py --model embed --no-item-ids   # codes only
     python scripts/run_semantic_ids.py --model generative            # predict the next item's code, beam search
     python scripts/run_semantic_ids.py --model generative --epochs 1 --user-fraction 0.05   # quick smoke run
+
+Codes come from the content embeddings by default. ``--item-vectors ckpt.pt`` builds them
+from the item table of a trained ``run_sequential.py`` checkpoint instead (behaviour codes);
+train that checkpoint on the same split (pass ``--validation`` to both when tuning).
 """
 from __future__ import annotations
 
@@ -17,7 +21,7 @@ from torch.utils.data import DataLoader
 
 from recsys.data import DEFAULT_DATA_DIR, load_dataset
 from recsys.item2item import default_device
-from recsys.report import save_leaderboard
+from recsys.report import save_best_epoch, save_leaderboard
 from recsys.semantic_ids import GenerativeRetrieval, SemanticIdEmbedding, code_stats, residual_kmeans
 from recsys.sequential import ChunkedSequenceDataset, NextItemTransformer, collate_fn
 from recsys.two_tower import SequenceDataset, fit, item_log_frequencies
@@ -25,8 +29,12 @@ from recsys.two_tower import SequenceDataset, fit, item_log_frequencies
 ROOT = Path(__file__).resolve().parents[1]
 
 
+ITEM_VECTORS_KEY = "encoder.item_embeddings.weight"
+
+
 def method_name(args: argparse.Namespace) -> str:
-    codes = f"{args.levels}x{args.codebook_size} codes"
+    source = "behaviour" if args.item_vectors else "content"
+    codes = f"{args.levels}x{args.codebook_size} {source} codes"
     inputs = "codes + item ids" if args.item_ids else "codes only"
     if args.model == "embed":
         return f"Transformer, semantic ID embeddings ({inputs}, {codes}, {args.epochs} ep), in-batch negatives + logQ"
@@ -41,6 +49,8 @@ def main() -> None:
                              "--model embed, codes only for --model generative)")
     parser.add_argument("--item-ids", dest="item_ids", action="store_true")
     parser.set_defaults(item_ids=None)
+    parser.add_argument("--item-vectors", type=Path,
+                        help="run_sequential.py checkpoint whose item embeddings are quantized instead of content")
     parser.add_argument("--levels", type=int, default=3)
     parser.add_argument("--codebook-size", type=int, default=256)
     parser.add_argument("--kmeans-iters", type=int, default=30)
@@ -59,6 +69,9 @@ def main() -> None:
     parser.add_argument("--device", default=default_device())
     parser.add_argument("--user-fraction", type=float, default=1.0, help="subsample users for quick runs")
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--validation", action="store_true",
+                        help="hold out the week before the test week instead; records the best epoch "
+                             "under results/validation/ and never looks at the test week")
     parser.add_argument("--output", type=Path, default=ROOT / "results" / "sequential.csv")
     parser.add_argument("--checkpoint", type=Path, help="where to save the trained state dict")
     args = parser.parse_args()
@@ -72,10 +85,14 @@ def main() -> None:
     torch.manual_seed(args.seed)
     device = torch.device(args.device)
 
-    ds = load_dataset(args.data_dir, reindex_items=True)
+    ds = load_dataset(args.data_dir, reindex_items=True, validation=args.validation)
     embeddings = ds.embeddings.sort("item_id")
     num_items = embeddings.height  # after reindexing, ids are exactly [0, num_items)
-    vectors = torch.from_numpy(np.stack(embeddings["embed"].to_list()).astype(np.float32)).to(device)
+    if args.item_vectors:
+        vectors = torch.load(args.item_vectors, map_location="cpu")[ITEM_VECTORS_KEY].float().to(device)
+        assert len(vectors) == num_items, f"checkpoint has {len(vectors)} items, dataset has {num_items}"
+    else:
+        vectors = torch.from_numpy(np.stack(embeddings["embed"].to_list()).astype(np.float32)).to(device)
     ids = residual_kmeans(vectors, levels=args.levels, codebook_size=args.codebook_size,
                           iters=args.kmeans_iters, seed=args.seed)
     print("semantic ids:", code_stats(ids), "residual error per level:",
@@ -119,7 +136,9 @@ def main() -> None:
     if args.checkpoint:
         args.checkpoint.parent.mkdir(parents=True, exist_ok=True)
         torch.save(model.state_dict(), args.checkpoint)
-    if args.user_fraction == 1.0:
+    if args.user_fraction == 1.0 and args.validation:
+        save_best_epoch(method_name(args), history, args.output.parent / "validation" / args.output.name, args.topk)
+    elif args.user_fraction == 1.0:
         final = {k: v for k, v in history[-1].items() if k not in ("epoch", "loss")}
         save_leaderboard([{"method": method_name(args), **final}], args.output, args.topk)
 

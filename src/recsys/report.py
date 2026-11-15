@@ -9,7 +9,7 @@ import polars as pl
 METRICS = ["hitrate", "recall", "ndcg", "coverage"]
 LABELS = {
     "hitrate": "HitRate", "recall": "Recall", "ndcg": "nDCG", "coverage": "Coverage",
-    "pair_acc_like": "PairAcc (like)", "pair_acc_full_play": "PairAcc (full play)",
+    "best_epoch": "Best epoch", "pair_acc_like": "PairAcc (like)", "pair_acc_full_play": "PairAcc (full play)",
 }
 
 
@@ -32,10 +32,24 @@ def save_leaderboard(
     board.write_csv(path)
 
     suffix = f"@{topk}" if topk else ""
-    header = "| Method | " + " | ".join(f"{LABELS.get(m, m)}{suffix}" for m in metrics) + " |"
+    header = "| Method | " + " | ".join(f"{LABELS.get(m, m)}{suffix if m in METRICS else ''}" for m in metrics) + " |"
     lines = [header, "|---|" + "---:|" * len(metrics)]
     for row in board.iter_rows(named=True):
-        lines.append(f"| {row['method']} | " + " | ".join(f"{row[m]:.4f}" for m in metrics) + " |")
+        lines.append(f"| {row['method']} | " + " | ".join(_fmt(row[m]) for m in metrics) + " |")
     path.with_suffix(".md").write_text("\n".join(lines) + "\n")
     print("\n".join(lines))
     return board
+
+
+def _fmt(value: object) -> str:
+    return f"{value:.4f}" if isinstance(value, float) else str(value)
+
+
+def save_best_epoch(method: str, history: List[Dict[str, float]], path: Union[str, Path],
+                    topk: int = 100, metric: str = "recall") -> Dict[str, object]:
+    """Record the epoch with the best ``metric`` from a validation run, as a leaderboard row."""
+    best = max(history, key=lambda log: log[metric])
+    row = {"method": method, "best_epoch": int(best["epoch"]), **{m: best[m] for m in METRICS}}
+    print(f"best epoch by validation {metric}: {row['best_epoch']}")
+    save_leaderboard([row], path, topk, metrics=["best_epoch", *METRICS], sort_by=metric)
+    return row

@@ -16,7 +16,7 @@ from torch.utils.data import DataLoader
 
 from recsys.data import DEFAULT_DATA_DIR, load_dataset
 from recsys.item2item import default_device
-from recsys.report import save_leaderboard
+from recsys.report import save_best_epoch, save_leaderboard
 from recsys.two_tower import (
     BCEModel,
     BPRModel,
@@ -74,6 +74,9 @@ def main() -> None:
     parser.add_argument("--device", default=default_device())
     parser.add_argument("--user-fraction", type=float, default=1.0, help="subsample users for quick runs")
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--validation", action="store_true",
+                        help="hold out the week before the test week instead; records the best epoch "
+                             "under results/validation/ and never looks at the test week")
     parser.add_argument("--output", type=Path, default=ROOT / "results" / "two_tower.csv")
     parser.add_argument("--checkpoint", type=Path, help="where to save the trained state dict")
     args = parser.parse_args()
@@ -83,7 +86,7 @@ def main() -> None:
     torch.manual_seed(args.seed)
     device = torch.device(args.device)
 
-    ds = load_dataset(args.data_dir, reindex_items=True)
+    ds = load_dataset(args.data_dir, reindex_items=True, validation=args.validation)
     num_items = ds.embeddings.height  # after reindexing, ids are exactly [0, num_items)
     histories = ds.user_histories()
     targets = ds.test_targets
@@ -112,7 +115,9 @@ def main() -> None:
     if args.checkpoint:
         args.checkpoint.parent.mkdir(parents=True, exist_ok=True)
         torch.save(model.state_dict(), args.checkpoint)
-    if args.user_fraction == 1.0:
+    if args.user_fraction == 1.0 and args.validation:
+        save_best_epoch(LOSSES[args.loss], history, args.output.parent / "validation" / args.output.name, args.topk)
+    elif args.user_fraction == 1.0:
         final = {k: v for k, v in history[-1].items() if k not in ("epoch", "loss")}
         save_leaderboard([{"method": LOSSES[args.loss], **final}], args.output, args.topk)
 
